@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Microsoft.Research.DynamicDataDisplay;
+using Microsoft.Research.DynamicDataDisplay.DataSources;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -92,13 +94,120 @@ namespace pymonitor {
                 Debug.WriteLine("Unable to list the counters for this category");
             }
         }
+
+
+
+
+
+
+
+
+        //PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec");
+        //PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec");
+
+
+
+        private ObservableDataSource<Point> dataSource_cpu = new ObservableDataSource<Point>();
+        private ObservableDataSource<Point> dataSource_ram = new ObservableDataSource<Point>();
+        private DispatcherTimer timer = new DispatcherTimer();
+        private int currentSecond = 0;
+
+        private void Button_Click_2(object sender, RoutedEventArgs e) {
+            plotter_cpu.AddLineGraph(dataSource_cpu, Colors.Black, 1);
+            plotter_cpu.LegendVisible = true;
+            plotter_ram.AddLineGraph(dataSource_ram, Colors.Black, 1);
+            plotter_ram.LegendVisible = true;
+
+            timer.Interval = TimeSpan.FromMilliseconds(interval);
+            timer.Tick += timer_Tick;
+            timer.IsEnabled = true;
+
+
+            //readBytesSec.InstanceName = "python";
+            //writeByteSec.InstanceName = "python";
+            //plotter.Viewport.FitToView();
+
+            Process[] p = Process.GetProcessesByName("python");
+            if(p.Length<1) return;
+            pro = p[1];
+        }
+        Process pro;
+
+        int xaxis = 0;
+        int yaxis = 100;
+        int group = 60;//默认组距  
+        Queue q_cpu = new Queue();
+        Queue q_ram = new Queue();
+
+        private void timer_Tick(object sender, EventArgs e) {
+            if(pro.HasExited) {
+                timer.Stop();
+                return;
+            }
+            Debug.WriteLine(currentSecond);
+            TimeSpan curTime = pro.TotalProcessorTime;
+            double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
+            prevCpuTime = curTime;
+
+            double ram = pro.WorkingSet64/1048576.0;
+            string ramStr = string.Format("{0:F2} MB", ram);
+
+            double x_cpu = currentSecond;
+            double y_cpu = cpuValue;
+            Point point_cpu = new Point(currentSecond, y_cpu);
+            Point point_ram = new Point(currentSecond, ram);
+            dataSource_cpu.AppendAsync(Dispatcher, point_cpu);
+            dataSource_ram.AppendAsync(Dispatcher, point_ram);
+
+
+            if(q_cpu.Count < group) {
+                q_cpu.Enqueue((int)y_cpu);//入队  
+                /*yaxis  = 0;
+                foreach(int c in q)
+                    if(c > yaxis)
+                        yaxis = c;*/
+            } else {
+                q_cpu.Dequeue();//出队  
+                q_cpu.Enqueue((int)y_cpu);//入队  
+                /*yaxis = 0;
+                foreach(int c in q)
+                    if(c > yaxis)
+                        yaxis = c;*/
+            }
+
+            if(q_ram.Count < group) {
+                q_ram.Enqueue((int)ram);
+            } else {
+                q_ram.Dequeue();//出队  
+                q_ram.Enqueue((int)ram);
+            }
+
+            if(currentSecond - group > 0) xaxis = currentSecond - group;
+            else xaxis = 0;
+
+            plotter_cpu.Viewport.Visible = new Rect(xaxis, 0, group, yaxis);
+            plotter_ram.Viewport.Visible = new Rect(xaxis, 0, group, yaxis);
+            currentSecond++;
+        }
+
+
+
+
+
+
+
+
+        int interval = 100;
+        TimeSpan prevCpuTime = TimeSpan.Zero;
+
+
         Thread threadGetData;
         private void Button_Click_1(object sender, RoutedEventArgs e) {
-            ClearLabel();
-            threadGetData = new Thread(GetDataThread) {
-                IsBackground = true
-            };
-            threadGetData.Start();
+            //ClearLabel();
+            //threadGetData = new Thread(GetDataThread) {
+            //    IsBackground = true
+            //};
+            //threadGetData.Start();
         }
 
         private void ClearLabel() {
@@ -110,8 +219,9 @@ namespace pymonitor {
 
         private void GetDataThread() {
             Process[] p = Process.GetProcessesByName("python");
-            int interval = 100;
-            TimeSpan prevCpuTime = TimeSpan.Zero;
+
+            
+            
 
 
             string pn = p[1].ProcessName;
@@ -120,7 +230,7 @@ namespace pymonitor {
             PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec", pn);
             PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec", pn);
 
-            Process pro = p[1];
+            //Process pro = p[1];
             string cpuStr, ramStr, readStr, writeStr;
             while(true) {
 
