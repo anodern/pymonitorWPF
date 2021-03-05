@@ -54,222 +54,266 @@ namespace pymonitor {
             }
         }
 
-        private static void PerformanceCounterFun(string CategoryName, string InstanceName, string CounterName) {
-            PerformanceCounter pc = new PerformanceCounter(CategoryName, CounterName, InstanceName);
-            while(true) {
-                Thread.Sleep(200); // wait for 1 second 
-                float cpuLoad = pc.NextValue();
-                Debug.WriteLine("CPU load = " + cpuLoad + " %.");
-            }
-        }
-
-        public static void GetCategoryNameList() {
-            PerformanceCounterCategory[] myCat2;
-            myCat2 = PerformanceCounterCategory.GetCategories();
-            for(int i = 0; i < myCat2.Length; i++) {
-                Debug.WriteLine(myCat2[i].CategoryName.ToString());
-            }
-        }
-        public static void GetInstanceNameListANDCounterNameList(string CategoryName) {
-            string[] instanceNames;
-            ArrayList counters = new ArrayList();
-            PerformanceCounterCategory mycat = new PerformanceCounterCategory(CategoryName);
-            try {
-                instanceNames = mycat.GetInstanceNames();
-                if(instanceNames.Length == 0) {
-                    counters.AddRange(mycat.GetCounters());
-                } else {
-                    for(int i = 0; i < instanceNames.Length; i++) {
-                        counters.AddRange(mycat.GetCounters(instanceNames[i]));
-                    }
-                }
-                for(int i = 0; i < instanceNames.Length; i++) {
-                    Debug.WriteLine(instanceNames[i]);
-                }
-                Debug.WriteLine("******************************");
-                foreach(PerformanceCounter counter in counters) {
-                    Debug.WriteLine(counter.CounterName);
-                }
-            } catch(Exception) {
-                Debug.WriteLine("Unable to list the counters for this category");
-            }
-        }
 
 
 
 
 
-
-
-
-        //PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec");
-        //PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec");
-
+        PerformanceCounter ramCounter = new PerformanceCounter("Process", "Working Set");
+        PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec");
+        PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec");
 
 
         private ObservableDataSource<Point> dataSource_cpu = new ObservableDataSource<Point>();
         private ObservableDataSource<Point> dataSource_ram = new ObservableDataSource<Point>();
+        private ObservableDataSource<Point> dataSource_read = new ObservableDataSource<Point>();
+        private ObservableDataSource<Point> dataSource_write = new ObservableDataSource<Point>();
         private DispatcherTimer timer = new DispatcherTimer();
         private int currentSecond = 0;
+        private int interval = 100;
+        private TimeSpan prevCpuTime = TimeSpan.Zero;
 
         private void Button_Click_2(object sender, RoutedEventArgs e) {
-            plotter_cpu.AddLineGraph(dataSource_cpu, Colors.Black, 1);
-            plotter_cpu.LegendVisible = true;
-            plotter_ram.AddLineGraph(dataSource_ram, Colors.Black, 1);
-            plotter_ram.LegendVisible = true;
-
-            timer.Interval = TimeSpan.FromMilliseconds(interval);
-            timer.Tick += timer_Tick;
-            timer.IsEnabled = true;
-
-
-            //readBytesSec.InstanceName = "python";
-            //writeByteSec.InstanceName = "python";
-            //plotter.Viewport.FitToView();
-
-            Process[] p = Process.GetProcessesByName("python");
-            if(p.Length<1) return;
-            pro = p[1];
+            RefreshProcessList();
         }
-        Process pro;
+        //Process pro;
 
-        int xaxis = 0;
-        int yaxis = 100;
         int group = 60;//默认组距  
+        int xaxis = 0;
+        double yaxis_ram = 0;
+        double yaxis_read = 0;
+        double yaxis_write = 0;
         Queue q_cpu = new Queue();
         Queue q_ram = new Queue();
+        Queue q_read = new Queue();
+        Queue q_write = new Queue();
 
         private void timer_Tick(object sender, EventArgs e) {
-            if(pro.HasExited) {
+            if(index >= p.Length || p[index].HasExited) {
                 timer.Stop();
+                RefreshProcessList();
                 return;
             }
-            Debug.WriteLine(currentSecond);
-            TimeSpan curTime = pro.TotalProcessorTime;
+            
+            //cpu
+            TimeSpan curTime = p[index].TotalProcessorTime;
             double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
             prevCpuTime = curTime;
 
-            double ram = pro.WorkingSet64/1048576.0;
-            string ramStr = string.Format("{0:F2} MB", ram);
-
-            double x_cpu = currentSecond;
-            double y_cpu = cpuValue;
-            Point point_cpu = new Point(currentSecond, y_cpu);
-            Point point_ram = new Point(currentSecond, ram);
-            dataSource_cpu.AppendAsync(Dispatcher, point_cpu);
-            dataSource_ram.AppendAsync(Dispatcher, point_ram);
-
-
-            if(q_cpu.Count < group) {
-                q_cpu.Enqueue((int)y_cpu);//入队  
-                /*yaxis  = 0;
-                foreach(int c in q)
-                    if(c > yaxis)
-                        yaxis = c;*/
-            } else {
-                q_cpu.Dequeue();//出队  
-                q_cpu.Enqueue((int)y_cpu);//入队  
-                /*yaxis = 0;
-                foreach(int c in q)
-                    if(c > yaxis)
-                        yaxis = c;*/
+            //ram
+            double ram, readByte, writeByte;
+            try {
+                ram = ramCounter.NextValue()/1048576.0;
+                readByte = readBytesSec.NextValue()/1024.0;
+                writeByte = writeByteSec.NextValue()/1024.0;
+            }catch(InvalidOperationException) {
+                timer.Stop();
+                RefreshProcessList();
+                return;
             }
 
-            if(q_ram.Count < group) {
-                q_ram.Enqueue((int)ram);
+            label_cpu.Content = string.Format("{0:F2} %", cpuValue);
+            label_memory.Content = string.Format("{0:F2} MB", ram);
+            label_read.Content = string.Format("{0:F2} KB/s", readByte);
+            label_write.Content = string.Format("{0:F2} KB/s", writeByte);
+
+
+            Point point_cpu = new Point(currentSecond, cpuValue);
+            Point point_ram = new Point(currentSecond, ram);
+            Point point_read = new Point(currentSecond, readByte);
+            Debug.WriteLine(readByte);
+            Point point_write = new Point(currentSecond, writeByte);
+            dataSource_cpu.AppendAsync(Dispatcher, point_cpu);
+            dataSource_ram.AppendAsync(Dispatcher, point_ram);
+            dataSource_read.AppendAsync(Dispatcher, point_read);
+            dataSource_write.AppendAsync(Dispatcher, point_write);
+
+
+            //cpu
+            if(q_cpu.Count < group) {
+                q_cpu.Enqueue(cpuValue);
             } else {
-                q_ram.Dequeue();//出队  
-                q_ram.Enqueue((int)ram);
+                q_cpu.Dequeue();
+                q_cpu.Enqueue(cpuValue);
+            }
+
+            //内存
+            if(q_ram.Count < group) {
+                q_ram.Enqueue(ram);
+                yaxis_ram = 0;
+                foreach(double c in q_ram)
+                    if(c > yaxis_ram)
+                        yaxis_ram = c;
+            } else {
+                q_ram.Dequeue();
+                q_ram.Enqueue(ram);
+                yaxis_ram = 0;
+                foreach(double c in q_ram)
+                    if(c > yaxis_ram)
+                        yaxis_ram = c;
+            }
+
+            //read
+            if(q_read.Count < group) {
+                q_read.Enqueue(readByte);
+                yaxis_read = 0;
+                foreach(double c in q_read)
+                    if(c > yaxis_read)
+                        yaxis_read = c;
+            } else {
+                q_read.Dequeue();
+                q_read.Enqueue(readByte);
+                yaxis_read = 0;
+                foreach(double c in q_read)
+                    if(c > yaxis_read)
+                        yaxis_read = c;
+            }
+
+            //write
+            if(q_write.Count < group) {
+                q_write.Enqueue(writeByte);
+                yaxis_write = 0;
+                foreach(double c in q_write)
+                    if(c > yaxis_write)
+                        yaxis_write = c;
+            } else {
+                q_write.Dequeue();
+                q_write.Enqueue(writeByte);
+                yaxis_write = 0;
+                foreach(double c in q_write)
+                    if(c > yaxis_write)
+                        yaxis_write = c;
             }
 
             if(currentSecond - group > 0) xaxis = currentSecond - group;
             else xaxis = 0;
 
-            plotter_cpu.Viewport.Visible = new Rect(xaxis, 0, group, yaxis);
-            plotter_ram.Viewport.Visible = new Rect(xaxis, 0, group, yaxis);
+            plotter_cpu.Viewport.Visible = new Rect(xaxis, 0, group, 100);
+            plotter_ram.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_ram*1.1);
+            plotter_read.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_read*1.1);
+            plotter_write.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_write*1.1);
             currentSecond++;
         }
 
-
-
-
-
-
-
-
-        int interval = 100;
-        TimeSpan prevCpuTime = TimeSpan.Zero;
-
-
-        Thread threadGetData;
-        private void Button_Click_1(object sender, RoutedEventArgs e) {
-            //ClearLabel();
-            //threadGetData = new Thread(GetDataThread) {
-            //    IsBackground = true
-            //};
-            //threadGetData.Start();
-        }
-
-        private void ClearLabel() {
-            label_cpu.Content = string.Empty;
-            label_memory.Content = string.Empty;
-            label_read.Content = string.Empty;
-            label_write.Content = string.Empty;
-        }
-
-        private void GetDataThread() {
-            Process[] p = Process.GetProcessesByName("python");
-
-            
-            
-
-
-            string pn = p[1].ProcessName;
-            //PerformanceCounter cpuCounter = new PerformanceCounter("Process", "% Processor Time", pn);
-            //PerformanceCounter ramCounter = new PerformanceCounter("Process", "Working Set", pn);
-            PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec", pn);
-            PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec", pn);
-
-            //Process pro = p[1];
-            string cpuStr, ramStr, readStr, writeStr;
-            while(true) {
-
-                TimeSpan curTime = pro.TotalProcessorTime;
-                double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
-                prevCpuTime = curTime;
-
-
-                cpuStr = string.Format("{0:F2} %", cpuValue);
-                ramStr = string.Format("{0:F2} MB", pro.WorkingSet64/1048576.0);
-
-                try {
-                    //cpuStr = string.Format("{0:F2} %", cpuCounter.NextValue());
-                    //ramStr = string.Format("{0:F2} MB", ramCounter.NextValue()/1024/1024);
-                    readStr = string.Format("{0:F2} KB/s", readBytesSec.NextValue()/1024);
-                    writeStr = string.Format("{0:F2} KB/s", writeByteSec.NextValue()/1024);
-                }catch(InvalidOperationException ioe) {
-                    break;
-                }
-
-                try {
-                    ThreadPool.QueueUserWorkItem(o => {
-                        Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
-                            label_cpu.Content = cpuStr;
-                            label_memory.Content = ramStr;
-                            label_read.Content = readStr;
-                            label_write.Content = writeStr;
-                        }));
-                    });
-                }catch(Exception e) {
-                    break;
-                }
-
-                Thread.Sleep(interval);
+        private void ComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
+            timer.Stop();
+            index = combo_process.SelectedIndex;
+            string pname = "python";
+            if(index>0) {
+                pname += "#"+index;
             }
-            Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
-                ClearLabel();
-            }));
+
+            ramCounter.InstanceName = pname;
+            readBytesSec.InstanceName = pname;
+            writeByteSec.InstanceName = pname;
+
+            timer.Start();
         }
 
+        Process[] p;
+        int index;
+        private void Window_Loaded(object sender, RoutedEventArgs e) {
+            plotter_cpu.AddLineGraph(dataSource_cpu, Colors.Red, 1.5, " ");
+            plotter_cpu.LegendVisible = true;
+            plotter_ram.AddLineGraph(dataSource_ram, Colors.Red, 1.5, " ");
+            plotter_ram.LegendVisible = true;
+            plotter_read.AddLineGraph(dataSource_read, Colors.Red, 1.5, " ");
+            plotter_read.LegendVisible = true;
+            plotter_write.AddLineGraph(dataSource_write, Colors.Red, 1.5, " ");
+            plotter_write.LegendVisible = true;
+
+
+
+            plotter_cpu.Viewport.FitToView();
+            plotter_ram.Viewport.FitToView();
+            plotter_read.Viewport.FitToView();
+            plotter_write.Viewport.FitToView();
+
+            RefreshProcessList();
+
+            timer.Interval = TimeSpan.FromMilliseconds(interval);
+            timer.Tick += timer_Tick;
+            timer.IsEnabled = false;
+
+        }
+
+        private void RefreshProcessList() {
+            combo_process.Items.Clear();
+            p = Process.GetProcessesByName("python");
+            for(int i = 0; i<p.Length; i++) {
+                combo_process.Items.Add(p[i].ProcessName + (i>0 ? "#"+i : ""));
+            }
+        }
+
+
+
+        /*
+                Thread threadGetData;
+                private void Button_Click_1(object sender, RoutedEventArgs e) {
+                    //ClearLabel();
+                    //threadGetData = new Thread(GetDataThread) {
+                    //    IsBackground = true
+                    //};
+                    //threadGetData.Start();
+                }
+
+                private void ClearLabel() {
+                    label_cpu.Content = string.Empty;
+                    label_memory.Content = string.Empty;
+                    label_read.Content = string.Empty;
+                    label_write.Content = string.Empty;
+                }
+
+                private void GetDataThread() {
+                    Process[] p = Process.GetProcessesByName("python");
+
+
+                    string pn = p[1].ProcessName;
+                    //PerformanceCounter cpuCounter = new PerformanceCounter("Process", "% Processor Time", pn);
+                    //PerformanceCounter ramCounter = new PerformanceCounter("Process", "Working Set", pn);
+                    PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec", pn);
+                    PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec", pn);
+
+                    //Process pro = p[1];
+                    string cpuStr, ramStr, readStr, writeStr;
+                    while(true) {
+
+                        TimeSpan curTime = pro.TotalProcessorTime;
+                        double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
+                        prevCpuTime = curTime;
+
+
+                        cpuStr = string.Format("{0:F2} %", cpuValue);
+                        ramStr = string.Format("{0:F2} MB", pro.WorkingSet64/1048576.0);
+
+                        try {
+                            //cpuStr = string.Format("{0:F2} %", cpuCounter.NextValue());
+                            //ramStr = string.Format("{0:F2} MB", ramCounter.NextValue()/1024/1024);
+                            readStr = string.Format("{0:F2} KB/s", readBytesSec.NextValue()/1024);
+                            writeStr = string.Format("{0:F2} KB/s", writeByteSec.NextValue()/1024);
+                        }catch(InvalidOperationException ioe) {
+                            break;
+                        }
+
+                        try {
+                            ThreadPool.QueueUserWorkItem(o => {
+                                Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
+                                    label_cpu.Content = cpuStr;
+                                    label_memory.Content = ramStr;
+                                    label_read.Content = readStr;
+                                    label_write.Content = writeStr;
+                                }));
+                            });
+                        }catch(Exception e) {
+                            break;
+                        }
+
+                        Thread.Sleep(interval);
+                    }
+                    Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
+                        ClearLabel();
+                    }));
+                }
+        */
     }
 }
