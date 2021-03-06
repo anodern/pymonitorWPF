@@ -2,12 +2,8 @@
 using Microsoft.Research.DynamicDataDisplay.DataSources;
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -28,100 +24,104 @@ namespace pymonitor {
             InitializeComponent();
         }
 
-        private void Button_Click(object sender, RoutedEventArgs e) {
-            Process p = Process.GetProcessById(27156);
-            string pn = p.ProcessName;
-            var readOpSec = new PerformanceCounter("Process", "IO Read Operations/sec", pn);
-            var writeOpSec = new PerformanceCounter("Process", "IO Write Operations/sec", pn);
-            var dataOpSec = new PerformanceCounter("Process", "IO Data Operations/sec", pn);
-            var readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec", pn);
-            var writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec", pn);
-            var dataBytesSec = new PerformanceCounter("Process", "IO Data Bytes/sec", pn);
+        //性能计数器
+        private PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec");
+        private PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec");
 
-            var counters = new List<PerformanceCounter> {
-                readOpSec,
-                writeOpSec,
-                dataOpSec,
-                readBytesSec,
-                writeByteSec,
-                dataBytesSec
-            };
-
-
-            foreach(PerformanceCounter counter in counters) {
-                float rawValue = counter.NextValue();
-                Debug.WriteLine(rawValue);
-            }
-        }
-
-
-
-
-
-
-        PerformanceCounter ramCounter = new PerformanceCounter("Process", "Working Set");
-        PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec");
-        PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec");
-
-
+        //折线点
         private ObservableDataSource<Point> dataSource_cpu = new ObservableDataSource<Point>();
         private ObservableDataSource<Point> dataSource_ram = new ObservableDataSource<Point>();
         private ObservableDataSource<Point> dataSource_read = new ObservableDataSource<Point>();
         private ObservableDataSource<Point> dataSource_write = new ObservableDataSource<Point>();
-        private DispatcherTimer timer = new DispatcherTimer();
-        private int currentSecond = 0;
-        private int interval = 100;
-        private TimeSpan prevCpuTime = TimeSpan.Zero;
 
-        private void Button_Click_2(object sender, RoutedEventArgs e) {
+        //定时器
+        private DispatcherTimer timerIdle = new DispatcherTimer();
+        private DispatcherTimer timer = new DispatcherTimer();
+        private int interval = 100;
+        private TimeSpan prevCpuTime;
+
+        //图表
+        private int currentSecond = 0;
+        private int xCount = 60;//x轴数量
+        private int xAxis = 0;
+        private double cpuMax = 0;
+        private double ramMax = 0;
+        private double readMax = 0;
+        private double writeMax = 0;
+
+        //点队列 计算y轴最大值
+        private Queue q_cpu = new Queue();
+        private Queue q_ram = new Queue();
+        private Queue q_read = new Queue();
+        private Queue q_write = new Queue();
+
+        //python进程
+        private Process[] p;
+        private int index;
+
+        private void Window_Loaded(object sender, RoutedEventArgs e) {
+            //折线
+            plotter_cpu.AddLineGraph(dataSource_cpu, Colors.Red, 1.5);
+            plotter_ram.AddLineGraph(dataSource_ram, Colors.Red, 1.5);
+            plotter_read.AddLineGraph(dataSource_read, Colors.Red, 1.5);
+            plotter_write.AddLineGraph(dataSource_write, Colors.Red, 1.5);
+
+            //关闭图例
+            plotter_cpu.LegendVisible = false;
+            plotter_ram.LegendVisible = false;
+            plotter_read.LegendVisible = false;
+            plotter_write.LegendVisible = false;
+
+            plotter_cpu.Viewport.FitToView();
+            plotter_ram.Viewport.FitToView();
+            plotter_read.Viewport.FitToView();
+            plotter_write.Viewport.FitToView();
+
+            //图表计时器
+            timer.Interval = TimeSpan.FromMilliseconds(interval);
+            timer.Tick += timer_Tick;
+            timer.IsEnabled = false;
+
+            //刷新进程计时器
+            timerIdle.Interval = TimeSpan.FromSeconds(2);
+            timerIdle.Tick += timerIdle_Tick;
+            timerIdle.IsEnabled = false;
+
             RefreshProcessList();
         }
-        //Process pro;
 
-        int group = 60;//默认组距  
-        int xaxis = 0;
-        double yaxis_ram = 0;
-        double yaxis_read = 0;
-        double yaxis_write = 0;
-        Queue q_cpu = new Queue();
-        Queue q_ram = new Queue();
-        Queue q_read = new Queue();
-        Queue q_write = new Queue();
+        private void btn_refresh_Click(object sender, RoutedEventArgs e) {
+            RefreshProcessList();
+        }
 
         private void timer_Tick(object sender, EventArgs e) {
             if(index >= p.Length || p[index].HasExited) {
-                timer.Stop();
-                RefreshProcessList();
+                StopTimer();
                 return;
             }
-            
-            //cpu
-            TimeSpan curTime = p[index].TotalProcessorTime;
-            double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
-            prevCpuTime = curTime;
 
-            //ram
-            double ram, readByte, writeByte;
+            //cpu和内存
+            TimeSpan curTime = p[index].TotalProcessorTime;
+            double cpu = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
+            prevCpuTime = curTime;
+            double ram = p[index].WorkingSet64/1048576.0;
+
+            //磁盘读写
+            double readByte, writeByte;
             try {
-                ram = ramCounter.NextValue()/1048576.0;
+                //ram = ramCounter.NextValue()/1048576.0;
                 readByte = readBytesSec.NextValue()/1024.0;
                 writeByte = writeByteSec.NextValue()/1024.0;
             }catch(InvalidOperationException) {
-                timer.Stop();
-                RefreshProcessList();
+                StopTimer();
                 return;
             }
 
-            label_cpu.Content = string.Format("{0:F2} %", cpuValue);
-            label_memory.Content = string.Format("{0:F2} MB", ram);
-            label_read.Content = string.Format("{0:F2} KB/s", readByte);
-            label_write.Content = string.Format("{0:F2} KB/s", writeByte);
 
-
-            Point point_cpu = new Point(currentSecond, cpuValue);
+            //折线图添加点
+            Point point_cpu = new Point(currentSecond, cpu);
             Point point_ram = new Point(currentSecond, ram);
             Point point_read = new Point(currentSecond, readByte);
-            Debug.WriteLine(readByte);
             Point point_write = new Point(currentSecond, writeByte);
             dataSource_cpu.AppendAsync(Dispatcher, point_cpu);
             dataSource_ram.AppendAsync(Dispatcher, point_ram);
@@ -129,191 +129,126 @@ namespace pymonitor {
             dataSource_write.AppendAsync(Dispatcher, point_write);
 
 
+            if(currentSecond - xCount > 0) xAxis = currentSecond - xCount;
+            else xAxis = 0;
+
+            //计算最大值
             //cpu
-            if(q_cpu.Count < group) {
-                q_cpu.Enqueue(cpuValue);
-            } else {
-                q_cpu.Dequeue();
-                q_cpu.Enqueue(cpuValue);
+            if(q_ram.Count >= xCount) q_ram.Dequeue();
+            q_ram.Enqueue(cpu);
+            cpuMax = 0;
+            foreach(double c in q_ram) {
+                if(c > cpuMax) cpuMax = c;
             }
 
             //内存
-            if(q_ram.Count < group) {
-                q_ram.Enqueue(ram);
-                yaxis_ram = 0;
-                foreach(double c in q_ram)
-                    if(c > yaxis_ram)
-                        yaxis_ram = c;
-            } else {
-                q_ram.Dequeue();
-                q_ram.Enqueue(ram);
-                yaxis_ram = 0;
-                foreach(double c in q_ram)
-                    if(c > yaxis_ram)
-                        yaxis_ram = c;
+            if(q_ram.Count >= xCount) q_ram.Dequeue();
+            q_ram.Enqueue(ram);
+            ramMax = 0;
+            foreach(double c in q_ram) {
+                if(c > ramMax) ramMax = c;
             }
 
             //read
-            if(q_read.Count < group) {
-                q_read.Enqueue(readByte);
-                yaxis_read = 0;
-                foreach(double c in q_read)
-                    if(c > yaxis_read)
-                        yaxis_read = c;
-            } else {
-                q_read.Dequeue();
-                q_read.Enqueue(readByte);
-                yaxis_read = 0;
-                foreach(double c in q_read)
-                    if(c > yaxis_read)
-                        yaxis_read = c;
+            if(q_read.Count >= xCount) q_read.Dequeue();
+            q_read.Enqueue(readByte);
+            readMax = 0;
+            foreach(double c in q_read) {
+                if(c > readMax) readMax = c;
             }
 
             //write
-            if(q_write.Count < group) {
-                q_write.Enqueue(writeByte);
-                yaxis_write = 0;
-                foreach(double c in q_write)
-                    if(c > yaxis_write)
-                        yaxis_write = c;
-            } else {
-                q_write.Dequeue();
-                q_write.Enqueue(writeByte);
-                yaxis_write = 0;
-                foreach(double c in q_write)
-                    if(c > yaxis_write)
-                        yaxis_write = c;
+            if(q_write.Count >= xCount) q_write.Dequeue();
+            q_write.Enqueue(writeByte);
+            writeMax = 0;
+            foreach(double c in q_write) {
+                if(c > writeMax) writeMax = c;
             }
 
-            if(currentSecond - group > 0) xaxis = currentSecond - group;
-            else xaxis = 0;
 
-            plotter_cpu.Viewport.Visible = new Rect(xaxis, 0, group, 100);
-            plotter_ram.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_ram*1.1);
-            plotter_read.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_read*1.1);
-            plotter_write.Viewport.Visible = new Rect(xaxis, 0, group, yaxis_write*1.1);
+
+            //label显示数据
+            label_cpu.Content = string.Format("{0:F2} %", cpu);
+            label_memory.Content = string.Format("{0:F2} MB", ram);
+            label_read.Content = string.Format("{0:F2} KB/s", readByte);
+            label_write.Content = string.Format("{0:F2} KB/s", writeByte);
+
+            label_cpuMax.Content = string.Format("{0:F2} %", cpuMax);
+            label_memoryMax.Content = string.Format("{0:F2} MB", ramMax);
+            label_readMax.Content = string.Format("{0:F2} KB/s", readMax);
+            label_writeMax.Content = string.Format("{0:F2} KB/s", writeMax);
+
+            //设定显示区域
+            plotter_cpu.Viewport.Visible = new Rect(xAxis, 0, xCount, 100);
+            plotter_ram.Viewport.Visible = new Rect(xAxis, 0, xCount, ramMax*1.1);
+            plotter_read.Viewport.Visible = new Rect(xAxis, 0, xCount, readMax*1.1);
+            plotter_write.Viewport.Visible = new Rect(xAxis, 0, xCount, writeMax*1.1);
             currentSecond++;
         }
 
         private void ComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
             timer.Stop();
+            StartTimer();
+        }
+        private void btn_start_Click(object sender, RoutedEventArgs e) {
+            StartTimer();
+        }
+        private void btn_stop_Click(object sender, RoutedEventArgs e) {
+            timer.Stop();
+            if(combo_process.SelectedIndex>=0) {
+                btn_start.IsEnabled = true;
+            }
+        }
+
+        private void StartTimer() {
             index = combo_process.SelectedIndex;
+            if(index<0 || p[index].HasExited) {
+                RefreshProcessList();
+                return;
+            }
+
             string pname = "python";
             if(index>0) {
                 pname += "#"+index;
             }
 
-            ramCounter.InstanceName = pname;
             readBytesSec.InstanceName = pname;
             writeByteSec.InstanceName = pname;
 
+            prevCpuTime = p[index].TotalProcessorTime;
             timer.Start();
+            btn_start.IsEnabled = false;
+            btn_stop.IsEnabled = true;
         }
 
-        Process[] p;
-        int index;
-        private void Window_Loaded(object sender, RoutedEventArgs e) {
-            plotter_cpu.AddLineGraph(dataSource_cpu, Colors.Red, 1.5, " ");
-            plotter_cpu.LegendVisible = true;
-            plotter_ram.AddLineGraph(dataSource_ram, Colors.Red, 1.5, " ");
-            plotter_ram.LegendVisible = true;
-            plotter_read.AddLineGraph(dataSource_read, Colors.Red, 1.5, " ");
-            plotter_read.LegendVisible = true;
-            plotter_write.AddLineGraph(dataSource_write, Colors.Red, 1.5, " ");
-            plotter_write.LegendVisible = true;
-
-
-
-            plotter_cpu.Viewport.FitToView();
-            plotter_ram.Viewport.FitToView();
-            plotter_read.Viewport.FitToView();
-            plotter_write.Viewport.FitToView();
-
+        private void StopTimer() {
+            timer.Stop();
             RefreshProcessList();
-
-            timer.Interval = TimeSpan.FromMilliseconds(interval);
-            timer.Tick += timer_Tick;
-            timer.IsEnabled = false;
-
         }
 
         private void RefreshProcessList() {
+            //刷新进程列表
             combo_process.Items.Clear();
             p = Process.GetProcessesByName("python");
             for(int i = 0; i<p.Length; i++) {
                 combo_process.Items.Add(p[i].ProcessName + (i>0 ? "#"+i : ""));
             }
+            btn_start.IsEnabled = false;
+            btn_stop.IsEnabled = false;
+            label_count.Content = p.Length;
+
+            //未启用python,每2s刷新一次
+            if(p.Length == 0) {
+                if(!timerIdle.IsEnabled) {
+                    timerIdle.Start();
+                }
+            } else {
+                timerIdle.Stop();
+            }
         }
 
-
-
-        /*
-                Thread threadGetData;
-                private void Button_Click_1(object sender, RoutedEventArgs e) {
-                    //ClearLabel();
-                    //threadGetData = new Thread(GetDataThread) {
-                    //    IsBackground = true
-                    //};
-                    //threadGetData.Start();
-                }
-
-                private void ClearLabel() {
-                    label_cpu.Content = string.Empty;
-                    label_memory.Content = string.Empty;
-                    label_read.Content = string.Empty;
-                    label_write.Content = string.Empty;
-                }
-
-                private void GetDataThread() {
-                    Process[] p = Process.GetProcessesByName("python");
-
-
-                    string pn = p[1].ProcessName;
-                    //PerformanceCounter cpuCounter = new PerformanceCounter("Process", "% Processor Time", pn);
-                    //PerformanceCounter ramCounter = new PerformanceCounter("Process", "Working Set", pn);
-                    PerformanceCounter readBytesSec = new PerformanceCounter("Process", "IO Read Bytes/sec", pn);
-                    PerformanceCounter writeByteSec = new PerformanceCounter("Process", "IO Write Bytes/sec", pn);
-
-                    //Process pro = p[1];
-                    string cpuStr, ramStr, readStr, writeStr;
-                    while(true) {
-
-                        TimeSpan curTime = pro.TotalProcessorTime;
-                        double cpuValue = (curTime - prevCpuTime).TotalMilliseconds / interval /Environment.ProcessorCount * 100;
-                        prevCpuTime = curTime;
-
-
-                        cpuStr = string.Format("{0:F2} %", cpuValue);
-                        ramStr = string.Format("{0:F2} MB", pro.WorkingSet64/1048576.0);
-
-                        try {
-                            //cpuStr = string.Format("{0:F2} %", cpuCounter.NextValue());
-                            //ramStr = string.Format("{0:F2} MB", ramCounter.NextValue()/1024/1024);
-                            readStr = string.Format("{0:F2} KB/s", readBytesSec.NextValue()/1024);
-                            writeStr = string.Format("{0:F2} KB/s", writeByteSec.NextValue()/1024);
-                        }catch(InvalidOperationException ioe) {
-                            break;
-                        }
-
-                        try {
-                            ThreadPool.QueueUserWorkItem(o => {
-                                Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
-                                    label_cpu.Content = cpuStr;
-                                    label_memory.Content = ramStr;
-                                    label_read.Content = readStr;
-                                    label_write.Content = writeStr;
-                                }));
-                            });
-                        }catch(Exception e) {
-                            break;
-                        }
-
-                        Thread.Sleep(interval);
-                    }
-                    Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.SystemIdle, new Action(() => {
-                        ClearLabel();
-                    }));
-                }
-        */
+        private void timerIdle_Tick(object sender, EventArgs e) {
+            RefreshProcessList();
+        }
     }
 }

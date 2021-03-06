@@ -3,9 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:pymonitor" xmlns:d3="clr-namespace:InteractiveDataDisplay.WPF;assembly=InteractiveDataDisplay.WPF" xmlns:d31="http://research.microsoft.com/DynamicDataDisplay/1.0"
+        xmlns:local="clr-namespace:pymonitor" xmlns:d3="clr-namespace:InteractiveDataDisplay.WPF;assembly=InteractiveDataDisplay.WPF" 
+        xmlns:d31="http://research.microsoft.com/DynamicDataDisplay/1.0"
         mc:Ignorable="d"
-        Title="MainWindow" Height="700" Width="700" Loaded="Window_Loaded">
+        Title="Python性能监视器" Height="700" Width="700" Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="200*"/>
@@ -14,24 +15,30 @@
             <RowDefinition Height="200*"/>
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="29*"/>
-            <ColumnDefinition Width="111*"/>
+            <ColumnDefinition Width="30*"/>
+            <ColumnDefinition Width="110*"/>
         </Grid.ColumnDefinitions>
-        <Label x:Name="label_cpu" Content="0 %" Margin="61,53,5,0" VerticalAlignment="Top" FontSize="14"/>
-        <Label x:Name="label_memory" Content="0 MB" Margin="61,81,5,0" VerticalAlignment="Top" FontSize="14"/>
-        <Label x:Name="label_read" Content="0 KB/s" Margin="61,109,5,0" VerticalAlignment="Top" FontSize="14"/>
-        <Label x:Name="label_write" Content="0 KB/s" Margin="61,138,5,0" VerticalAlignment="Top" FontSize="14"/>
-        <Label Content="CPU:" HorizontalAlignment="Left" Margin="10,53,0,0" VerticalAlignment="Top" FontSize="14" Width="46"/>
-        <Label Content="内存:" HorizontalAlignment="Left" Margin="10,81,0,0" VerticalAlignment="Top" FontSize="14" Width="46"/>
-        <Label Content="读:" HorizontalAlignment="Left" Margin="10,109,0,0" VerticalAlignment="Top" FontSize="14" Width="30"/>
-        <Label Content="写:" HorizontalAlignment="Left" Margin="10,133,0,0" VerticalAlignment="Top" FontSize="14" Width="30"/>
 
-        <Button Content="Refresh" HorizontalAlignment="Center" Height="30" Margin="0,10,0,0" VerticalAlignment="Top" Width="125" Click="Button_Click_2" Grid.Row="1"/>
+        <Button x:Name="btn_refresh" Content="刷新进程列表" Height="30" Margin="10,18,10,0" VerticalAlignment="Top" Click="btn_refresh_Click"/>
+        <ComboBox x:Name="combo_process" Height="24" VerticalAlignment="Top" Margin="10,82,10,0" SelectionChanged="ComboBox_SelectionChanged"/>
+
+
+        <Label Content="当前值" Height="27" Margin="10,5,10,0" FontWeight="Bold" FontSize="14" Grid.Row="1" VerticalAlignment="Top"/>
+        <Label x:Name="label_cpu" Content="0 %" Margin="56,40,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="1"/>
+        <Label x:Name="label_memory" Content="0 MB" Margin="56,69,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="1"/>
+        <Label x:Name="label_read" Content="0 KB/s" Margin="56,97,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="1"/>
+        <Label x:Name="label_write" Content="0 KB/s" Margin="56,125,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="1"/>
+        <Label Content="CPU:" HorizontalAlignment="Left" Margin="10,40,0,0" VerticalAlignment="Top" FontSize="14" Width="46" Grid.Row="1"/>
+        <Label Content="内存:" HorizontalAlignment="Left" Margin="10,69,0,0" VerticalAlignment="Top" FontSize="14" Width="46" Grid.Row="1"/>
+        <Label Content="读:" HorizontalAlignment="Left" Margin="10,97,0,0" VerticalAlignment="Top" FontSize="14" Width="30" Grid.Row="1"/>
+        <Label Content="写:" HorizontalAlignment="Left" Margin="10,125,0,0" VerticalAlignment="Top" FontSize="14" Width="30" Grid.Row="1"/>
+
+
 
 
         <d31:ChartPlotter x:Name="plotter_cpu" Margin="0,0,10,0" Grid.Column="1" Grid.Row="0">
             <d31:ChartPlotter.VerticalAxis>
-                <d31:VerticalAxis Width="35" />
+                <d31:VerticalAxis Width="40" Placement="Right"/>
             </d31:ChartPlotter.VerticalAxis>
             <d31:ChartPlotter.HorizontalAxis>
                 <d31:HorizontalIntegerAxis />
@@ -42,37 +49,49 @@
         </d31:ChartPlotter>
         <d31:ChartPlotter x:Name="plotter_ram" Margin="0,0,10,0" Grid.Column="1" Grid.Row="1">
             <d31:ChartPlotter.VerticalAxis>
-                <d31:VerticalAxis Width="35" HorizontalAlignment="Right" HorizontalContentAlignment="Right"/>
+                <d31:VerticalAxis Width="40" Placement="Right"/>
             </d31:ChartPlotter.VerticalAxis>
             <d31:ChartPlotter.HorizontalAxis>
                 <d31:HorizontalIntegerAxis />
             </d31:ChartPlotter.HorizontalAxis>
 
-            <d31:Header Content="RAM" FontSize="12"/>
+            <d31:Header Content="内存(工作集)" FontSize="12"/>
             <d31:VerticalAxisTitle Content="MB" FontSize="12"/>
         </d31:ChartPlotter>
         <d31:ChartPlotter x:Name="plotter_read" Margin="0,0,10,0" Grid.Column="1" Grid.Row="2">
             <d31:ChartPlotter.VerticalAxis>
-                <d31:VerticalAxis Width="35"/>
+                <d31:VerticalAxis Width="40" Placement="Right"/>
             </d31:ChartPlotter.VerticalAxis>
             <d31:ChartPlotter.HorizontalAxis>
                 <d31:HorizontalIntegerAxis />
             </d31:ChartPlotter.HorizontalAxis>
 
-            <d31:Header Content="Read" FontSize="12"/>
+            <d31:Header Content="IO读取" FontSize="12"/>
             <d31:VerticalAxisTitle Content="KB/s" FontSize="12"/>
         </d31:ChartPlotter>
         <d31:ChartPlotter x:Name="plotter_write" Margin="0,0,10,0" Grid.Column="1" Grid.Row="3" >
             <d31:ChartPlotter.VerticalAxis>
-                <d31:VerticalAxis Width="35"/>
+                <d31:VerticalAxis Width="40" Placement="Right"/>
             </d31:ChartPlotter.VerticalAxis>
             <d31:ChartPlotter.HorizontalAxis>
                 <d31:HorizontalIntegerAxis />
             </d31:ChartPlotter.HorizontalAxis>
 
-            <d31:Header Content="Write" FontSize="12" />
+            <d31:Header Content="IO写入" FontSize="12" />
             <d31:VerticalAxisTitle Content="KB/s" FontSize="12"/>
         </d31:ChartPlotter>
-        <ComboBox x:Name="combo_process" HorizontalAlignment="Center" Height="28" VerticalAlignment="Top" Width="125" Margin="0,10,0,0" SelectionChanged="ComboBox_SelectionChanged"/>
+        <Label Content="进程数量：" Height="24" Margin="10,53,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" Width="65"/>
+        <Label x:Name="label_count" Content="0" Height="24" Margin="75,53,10,0" VerticalAlignment="Top"/>
+        <Label x:Name="label_cpuMax" Content="0 %" Margin="56,40,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="2"/>
+        <Label x:Name="label_memoryMax" Content="0 MB" Margin="56,69,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="2"/>
+        <Label x:Name="label_readMax" Content="0 KB/s" Margin="56,97,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="2"/>
+        <Label x:Name="label_writeMax" Content="0 KB/s" Margin="56,125,5,0" VerticalAlignment="Top" FontSize="14" Grid.Row="2"/>
+        <Label Content="CPU:" HorizontalAlignment="Left" Margin="10,40,0,0" VerticalAlignment="Top" FontSize="14" Width="46" Grid.Row="2"/>
+        <Label Content="内存:" HorizontalAlignment="Left" Margin="10,69,0,0" VerticalAlignment="Top" FontSize="14" Width="46" Grid.Row="2"/>
+        <Label Content="读:" HorizontalAlignment="Left" Margin="10,97,0,0" VerticalAlignment="Top" FontSize="14" Width="30" Grid.Row="2"/>
+        <Label Content="写:" HorizontalAlignment="Left" Margin="10,125,0,0" VerticalAlignment="Top" FontSize="14" Width="30" Grid.Row="2"/>
+        <Label Content="最大值" Height="27" Margin="10,5,10,0" FontWeight="Bold" FontSize="14" Grid.Row="2" VerticalAlignment="Top"/>
+        <Button x:Name="btn_start" Content="开始" Margin="10,124,82,0" VerticalAlignment="Top" Height="28" IsEnabled="False" Click="btn_start_Click"/>
+        <Button x:Name="btn_stop" Content="停止" Margin="82,124,10,0" VerticalAlignment="Top" Height="28" IsEnabled="False" Click="btn_stop_Click"/>
     </Grid>
 </Window>
